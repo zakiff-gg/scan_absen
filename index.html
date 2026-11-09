@@ -10152,9 +10152,20 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     .pekerja .jam { color: var(--soft); font-size: 12px; white-space: nowrap; }
     .pekerja .jam.lokasi { color: var(--ok); }
     .hidden { display: none; }
+    #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 12px);
+      transform: translate(-50%, -140%); width: min(92vw, 440px); z-index: 999; pointer-events: none;
+      padding: 14px 18px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+      transition: transform .28s ease, opacity .28s ease; opacity: 0; }
+    #toast.show { transform: translate(-50%, 0); opacity: 1; }
+    #toast.ok { background: #12805f; border: 2px solid var(--ok); }
+    #toast.warn { background: #8a6a12; border: 2px solid var(--warn); }
+    #toast.err { background: #8f2a33; border: 2px solid var(--err); }
+    #toast b { display: block; font-size: 19px; }
+    #toast span { font-size: 14px; opacity: .95; }
   </style>
 </head>
 <body>
+  <div id="toast"><b id="toastJudul"></b><span id="toastIsi"></span></div>
   <h1>Absen SSP - Scan QR</h1>
   <div class="sub">PT Sirla Sirli Puteri</div>
 
@@ -10274,6 +10285,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     el('segPulang').addEventListener('click', function () { setJenis('Pulang'); });
 
     el('btnKamera').addEventListener('click', function () {
+      siapkanBunyi();
       if (scanning) { stopKamera(); return; }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         tampil('err', 'Kamera tidak tersedia', 'Pakai tombol "Ambil foto QR".');
@@ -10328,7 +10340,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       requestAnimationFrame(loopScan);
     }
 
-    el('btnFoto').addEventListener('click', function () { el('fileFoto').click(); });
+    el('btnFoto').addEventListener('click', function () { siapkanBunyi(); el('fileFoto').click(); });
     el('fileFoto').addEventListener('change', function () {
       var f = this.files && this.files[0];
       if (!f) return;
@@ -10359,19 +10371,24 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
           r = r || {};
           if (r.status === 'SUKSES') {
             tampil('ok', r.nama + ' - ' + r.jenis, (r.keterangan || r.pesan || ''));
+            toast('ok', '\u2713 ' + r.nama, 'Absen ' + r.jenis + ' berhasil' + (r.keterangan ? ' \u00b7 ' + r.keterangan : ''));
             muatRekap();
           } else if (r.status === 'SUDAH_ABSEN') {
             tampil('warn', r.nama || 'Sudah absen', r.pesan || '');
+            toast('warn', r.nama || 'Sudah absen', r.pesan || 'Sudah tercatat hari ini.');
           } else if (r.status === 'TIDAK_DIKENAL') {
             tampil('err', 'Kartu tidak terdaftar', 'Hubungi admin.');
+            toast('err', 'Kartu tidak terdaftar', 'Hubungi admin.');
           } else {
             tampil('err', 'Gagal', r.pesan || 'Terjadi kesalahan.');
+            toast('err', 'Gagal', r.pesan || 'Terjadi kesalahan.');
           }
         })
         .catch(function (err) {
           tampil('err', 'Gagal terhubung', (err.message || err) + ' - cek sinyal lalu scan ulang.');
+          toast('err', 'Gagal terhubung', 'Cek sinyal lalu scan ulang.');
         })
-        .then(function () { setTimeout(function () { sibuk = false; }, 2500); });
+        .then(function () { setTimeout(function () { sibuk = false; }, 1000); });
     }
 
     // ---------- Rekap pekerja per proyek (hari ini) ----------
@@ -10413,6 +10430,50 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         });
         box.appendChild(d);
       });
+    }
+
+    // ---------- Notifikasi popup + bunyi ----------
+    var toastTimer = null;
+    var audioCtx = null;
+
+    function toast(kelas, judul, isi) {
+      var t = el('toast');
+      el('toastJudul').innerText = judul;
+      el('toastIsi').innerText = isi || '';
+      t.className = kelas + ' show';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { t.className = kelas; }, 3200);
+      bunyi(kelas);
+      try { if (navigator.vibrate) navigator.vibrate(kelas === 'ok' ? 150 : [120, 80, 120]); } catch (e) {}
+    }
+
+    // iOS hanya mengizinkan bunyi setelah ada sentuhan pengguna -> dipanggil dari tombol kamera/foto.
+    function siapkanBunyi() {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        if (!audioCtx) audioCtx = new AC();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      } catch (e) {}
+    }
+
+    function bunyi(kelas) {
+      try {
+        if (!audioCtx) return;
+        var nada = kelas === 'ok' ? [880, 1320] : [330, 260];
+        nada.forEach(function (f, i) {
+          var o = audioCtx.createOscillator();
+          var g = audioCtx.createGain();
+          o.type = 'sine';
+          o.frequency.value = f;
+          var t0 = audioCtx.currentTime + i * 0.13;
+          g.gain.setValueAtTime(0.0001, t0);
+          g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+          o.connect(g); g.connect(audioCtx.destination);
+          o.start(t0); o.stop(t0 + 0.13);
+        });
+      } catch (e) {}
     }
 
     function tampil(kelas, judul, isi) {
