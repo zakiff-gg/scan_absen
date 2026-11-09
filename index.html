@@ -106,6 +106,12 @@
     var scanning = false;
     var sibuk = false;
     var el = function (id) { return document.getElementById(id); };
+    if (typeof jsQR === 'undefined') {
+      setTimeout(function () {
+        tampil('err', 'Pustaka pemindai QR gagal dimuat',
+          'Matikan pemblokir konten/iklan di Safari atau ganti jaringan, lalu refresh halaman.');
+      }, 300);
+    }
 
     // POST form-urlencoded = "simple request" (tanpa preflight CORS), cocok dengan Apps Script.
     function apiPost(params) {
@@ -179,6 +185,7 @@
           el('videoWrap').classList.remove('hidden');
           el('btnKamera').innerText = 'Tutup kamera';
           scanning = true;
+          tampil('warn', 'Kamera aktif', 'Arahkan ke QR, jarak sekitar 15-25 cm, jangan goyang.');
           requestAnimationFrame(loopScan);
         })
         .catch(function (err) {
@@ -196,15 +203,23 @@
 
     function loopScan() {
       if (!scanning) return;
-      var v = el('video');
-      if (v.readyState === v.HAVE_ENOUGH_DATA && !sibuk) {
-        var c = el('canvas');
-        c.width = v.videoWidth; c.height = v.videoHeight;
-        var ctx = c.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(v, 0, 0, c.width, c.height);
-        var img = ctx.getImageData(0, 0, c.width, c.height);
-        var code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-        if (code && code.data) kirim(code.data);
+      try {
+        var v = el('video');
+        if (v.readyState === v.HAVE_ENOUGH_DATA && !sibuk && v.videoWidth > 0) {
+          var skala = Math.min(1, 720 / v.videoWidth);
+          var c = el('canvas');
+          c.width = Math.round(v.videoWidth * skala);
+          c.height = Math.round(v.videoHeight * skala);
+          var ctx = c.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(v, 0, 0, c.width, c.height);
+          var img = ctx.getImageData(0, 0, c.width, c.height);
+          var code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
+          if (code && code.data) kirim(code.data);
+        }
+      } catch (e) {
+        stopKamera();
+        tampil('err', 'Pemindai error', String((e && e.message) || e));
+        return;
       }
       requestAnimationFrame(loopScan);
     }
@@ -234,7 +249,7 @@
     function kirim(uid) {
       if (sibuk) return;
       sibuk = true;
-      tampil('warn', 'Memproses...', '');
+      tampil('warn', 'Memproses...', 'Isi QR: ' + uid);
       apiPost({ action: 'webAbsen', pin: pin, uid: String(uid), jenis: jenis, proyek: el('proyek').value })
         .then(function (r) {
           r = r || {};
