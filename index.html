@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<!-- Halaman scan QR Absen SSP versi STANDALONE (di-host di luar Apps Script, mis. GitHub Pages).
+     Kamera live berfungsi karena halaman ini TIDAK berada di dalam iframe Apps Script.
+     WAJIB diisi: API_URL di bawah = URL Web App Apps Script Anda (yang berakhiran /exec). -->
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Absen SSP - Scan QR</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+  <style>
+    :root {
+      --bg: #14112b; --card: #211a45; --line: #3a2f70; --ink: #f4eeff; --soft: #b4a6e0;
+      --ok: #35d0a3; --warn: #ffc94a; --err: #ff6b6b; --accent: #7c5cff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { max-width: 480px; margin: 0 auto; padding: 20px 16px 48px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: var(--soft); font-size: 13px; margin-bottom: 18px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+    label { display: block; font-size: 12px; color: var(--soft); margin-bottom: 6px; }
+    input, select { width: 100%; padding: 13px 14px; border-radius: 12px; border: 1.5px solid var(--line);
+      background: #19133a; color: var(--ink); font-size: 16px; }
+    button { width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 16px; font-weight: 700;
+      background: var(--accent); color: #fff; margin-top: 12px; }
+    button.ghost { background: transparent; border: 1.5px solid var(--line); color: var(--soft); }
+    .seg { display: flex; gap: 8px; }
+    .seg button { margin: 0; background: #19133a; border: 1.5px solid var(--line); color: var(--soft); }
+    .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+    #videoWrap { position: relative; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 1 / 1; }
+    video { width: 100%; height: 100%; object-fit: cover; }
+    .frame { position: absolute; inset: 18%; border: 3px solid rgba(255,255,255,.85); border-radius: 18px; pointer-events: none; }
+    #hasil { border-radius: 16px; padding: 16px; margin-top: 14px; font-size: 15px; display: none; }
+    #hasil.ok { display: block; background: #0f3d30; border: 1px solid var(--ok); }
+    #hasil.warn { display: block; background: #46360f; border: 1px solid var(--warn); }
+    #hasil.err { display: block; background: #4a1f24; border: 1px solid var(--err); }
+    #hasil b { font-size: 18px; display: block; margin-bottom: 4px; }
+    .hint { font-size: 12px; color: var(--soft); margin-top: 10px; }
+    .rekap-head { display: flex; justify-content: space-between; align-items: center; margin-top: 22px; }
+    .rekap-head b { font-size: 16px; }
+    .rekap-head button { width: auto; margin: 0; padding: 8px 14px; font-size: 13px; }
+    details.proyek { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-top: 10px; }
+    details.proyek summary { font-weight: 700; font-size: 15px; cursor: pointer; }
+    .pekerja { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px dashed var(--line); font-size: 14px; }
+    .pekerja:first-of-type { margin-top: 10px; }
+    .pekerja .jam { color: var(--soft); font-size: 12px; white-space: nowrap; }
+    .pekerja .jam.lokasi { color: var(--ok); }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Absen SSP - Scan QR</h1>
+  <div class="sub">PT Sirla Sirli Puteri</div>
+
+  <div id="gate" class="card">
+    <label for="pin">PIN petugas</label>
+    <input type="password" id="pin" inputmode="numeric" autocomplete="off" placeholder="Masukkan PIN">
+    <button id="btnMasuk">Masuk</button>
+    <div id="gateMsg" class="hint"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card">
+      <label>Jenis absen</label>
+      <div class="seg">
+        <button id="segBerangkat" class="on">Berangkat</button>
+        <button id="segPulang">Pulang</button>
+      </div>
+      <div id="proyekBox" style="margin-top:12px">
+        <label for="proyek">Proyek (untuk Berangkat)</label>
+        <select id="proyek"></select>
+      </div>
+    </div>
+
+    <div id="videoWrap" class="hidden">
+      <video id="video" playsinline muted></video>
+      <div class="frame"></div>
+    </div>
+    <canvas id="canvas" class="hidden"></canvas>
+
+    <button id="btnKamera">Buka kamera</button>
+    <button id="btnFoto" class="ghost">Ambil foto QR (cadangan)</button>
+    <input type="file" id="fileFoto" accept="image/*" capture="environment" class="hidden">
+
+    <div id="hasil"></div>
+    <div class="rekap-head">
+      <b>Rekap pekerja hari ini</b>
+      <button id="btnRekap" class="ghost">Refresh</button>
+    </div>
+    <div class="hint" id="rekapTanggal"></div>
+    <div id="rekapList"></div>
+
+    <div class="hint">Arahkan kamera ke QR karyawan. Jika kamera ditolak, buka Pengaturan iPhone &gt; Safari &gt; Kamera &gt; Izinkan,
+      atau pakai "Ambil foto QR".</div>
+  </div>
+
+  <script>
+    // ====== WAJIB DIISI: URL Web App Apps Script Anda (yang berakhiran /exec) ======
+    var API_URL = "https://script.google.com/macros/s/GANTI_DENGAN_ID_DEPLOYMENT_ANDA/exec";
+
+    var pin = '';
+    var jenis = 'Berangkat';
+    var stream = null;
+    var scanning = false;
+    var sibuk = false;
+    var el = function (id) { return document.getElementById(id); };
+
+    // POST form-urlencoded = "simple request" (tanpa preflight CORS), cocok dengan Apps Script.
+    function apiPost(params) {
+      return fetch(API_URL, { method: 'POST', body: new URLSearchParams(params) })
+        .then(function (r) { return r.json(); });
+    }
+    function apiGet(params) {
+      return fetch(API_URL + '?' + new URLSearchParams(params).toString())
+        .then(function (r) { return r.json(); });
+    }
+
+    try { pin = sessionStorage.getItem('absenPin') || ''; } catch (e) {}
+    if (pin) mulaiApp();
+
+    el('btnMasuk').addEventListener('click', function () {
+      pin = el('pin').value.trim();
+      if (!pin) return;
+      el('gateMsg').innerText = 'Memeriksa...';
+      apiPost({ action: 'webCekPin', pin: pin })
+        .then(function (r) {
+          if (r && r.status === 'SUKSES') {
+            try { sessionStorage.setItem('absenPin', pin); } catch (e) {}
+            mulaiApp();
+          } else {
+            el('gateMsg').innerText = (r && r.pesan) || 'PIN salah.';
+          }
+        })
+        .catch(function (err) { el('gateMsg').innerText = 'Gagal terhubung: ' + err.message; });
+    });
+
+    function mulaiApp() {
+      el('gate').classList.add('hidden');
+      el('app').classList.remove('hidden');
+      muatRekap();
+      apiGet({ action: 'getProjects' })
+        .then(function (r) {
+          var sel = el('proyek');
+          sel.innerHTML = '';
+          var list = (r && r.proyek) || [];
+          for (var i = 0; i < list.length; i++) {
+            var o = document.createElement('option');
+            o.value = list[i]; o.textContent = list[i];
+            sel.appendChild(o);
+          }
+        })
+        .catch(function () { tampil('err', 'Gagal memuat daftar proyek', 'Cek sinyal lalu refresh halaman.'); });
+    }
+
+    function setJenis(j) {
+      jenis = j;
+      el('segBerangkat').classList.toggle('on', j === 'Berangkat');
+      el('segPulang').classList.toggle('on', j === 'Pulang');
+      el('proyekBox').classList.toggle('hidden', j === 'Pulang');
+    }
+    el('segBerangkat').addEventListener('click', function () { setJenis('Berangkat'); });
+    el('segPulang').addEventListener('click', function () { setJenis('Pulang'); });
+
+    el('btnKamera').addEventListener('click', function () {
+      if (scanning) { stopKamera(); return; }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        tampil('err', 'Kamera tidak tersedia', 'Pakai tombol "Ambil foto QR".');
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+        .then(function (s) {
+          stream = s;
+          var v = el('video');
+          v.srcObject = s;
+          v.setAttribute('playsinline', 'true');
+          v.play();
+          el('videoWrap').classList.remove('hidden');
+          el('btnKamera').innerText = 'Tutup kamera';
+          scanning = true;
+          requestAnimationFrame(loopScan);
+        })
+        .catch(function (err) {
+          tampil('err', 'Kamera ditolak/tidak bisa dibuka',
+            'Izinkan kamera untuk Safari, atau pakai "Ambil foto QR". (' + (err.name || err) + ')');
+        });
+    });
+
+    function stopKamera() {
+      scanning = false;
+      if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+      el('videoWrap').classList.add('hidden');
+      el('btnKamera').innerText = 'Buka kamera';
+    }
+
+    function loopScan() {
+      if (!scanning) return;
+      var v = el('video');
+      if (v.readyState === v.HAVE_ENOUGH_DATA && !sibuk) {
+        var c = el('canvas');
+        c.width = v.videoWidth; c.height = v.videoHeight;
+        var ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        var img = ctx.getImageData(0, 0, c.width, c.height);
+        var code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+        if (code && code.data) kirim(code.data);
+      }
+      requestAnimationFrame(loopScan);
+    }
+
+    el('btnFoto').addEventListener('click', function () { el('fileFoto').click(); });
+    el('fileFoto').addEventListener('change', function () {
+      var f = this.files && this.files[0];
+      if (!f) return;
+      var url = URL.createObjectURL(f);
+      var im = new Image();
+      im.onload = function () {
+        var skala = Math.min(1, 1000 / Math.max(im.width, im.height));
+        var c = el('canvas');
+        c.width = Math.round(im.width * skala); c.height = Math.round(im.height * skala);
+        var ctx = c.getContext('2d');
+        ctx.drawImage(im, 0, 0, c.width, c.height);
+        var data = ctx.getImageData(0, 0, c.width, c.height);
+        var code = jsQR(data.data, data.width, data.height);
+        URL.revokeObjectURL(url);
+        el('fileFoto').value = '';
+        if (code && code.data) kirim(code.data);
+        else tampil('err', 'QR tidak terbaca', 'Foto ulang lebih dekat dan pastikan QR terang & tidak blur.');
+      };
+      im.src = url;
+    });
+
+    function kirim(uid) {
+      if (sibuk) return;
+      sibuk = true;
+      tampil('warn', 'Memproses...', '');
+      apiPost({ action: 'webAbsen', pin: pin, uid: String(uid), jenis: jenis, proyek: el('proyek').value })
+        .then(function (r) {
+          r = r || {};
+          if (r.status === 'SUKSES') {
+            tampil('ok', r.nama + ' - ' + r.jenis, (r.keterangan || r.pesan || ''));
+            muatRekap();
+          } else if (r.status === 'SUDAH_ABSEN') {
+            tampil('warn', r.nama || 'Sudah absen', r.pesan || '');
+          } else if (r.status === 'TIDAK_DIKENAL') {
+            tampil('err', 'Kartu tidak terdaftar', 'Hubungi admin.');
+          } else {
+            tampil('err', 'Gagal', r.pesan || 'Terjadi kesalahan.');
+          }
+        })
+        .catch(function (err) {
+          tampil('err', 'Gagal terhubung', (err.message || err) + ' - cek sinyal lalu scan ulang.');
+        })
+        .then(function () { setTimeout(function () { sibuk = false; }, 2500); });
+    }
+
+    // ---------- Rekap pekerja per proyek (hari ini) ----------
+    el('btnRekap').addEventListener('click', muatRekap);
+
+    function muatRekap() {
+      el('rekapTanggal').innerText = 'Memuat...';
+      apiGet({ action: 'getRekapProyek' })
+        .then(function (r) { renderRekap((r && r.rekap) || [], r && r.tanggal); })
+        .catch(function () { el('rekapTanggal').innerText = 'Gagal memuat rekap. Cek sinyal lalu tekan Refresh.'; });
+    }
+
+    function renderRekap(list, tanggal) {
+      var box = el('rekapList');
+      box.innerHTML = '';
+      var totalOrang = 0;
+      list.forEach(function (p) { totalOrang += p.total; });
+      el('rekapTanggal').innerText = (tanggal || '') + ' \u00b7 total ' + totalOrang + ' orang absen';
+      if (!list.length) { box.innerText = 'Belum ada yang absen hari ini.'; return; }
+
+      list.forEach(function (p) {
+        var d = document.createElement('details');
+        d.className = 'proyek';
+        if (list.length === 1) d.open = true;
+        var sm = document.createElement('summary');
+        sm.innerText = p.proyek + ' \u2014 ' + p.total + ' orang (' + p.masihDiLokasi + ' masih di lokasi)';
+        d.appendChild(sm);
+        p.pekerja.forEach(function (w) {
+          var row = document.createElement('div');
+          row.className = 'pekerja';
+          var n = document.createElement('span');
+          n.innerText = w.nama;
+          var j = document.createElement('span');
+          j.className = 'jam' + (w.jamPulang ? '' : ' lokasi');
+          j.innerText = (w.jamBerangkat || '?') + (w.jamPulang ? ' \u2192 ' + w.jamPulang : ' \u00b7 di lokasi');
+          row.appendChild(n);
+          row.appendChild(j);
+          d.appendChild(row);
+        });
+        box.appendChild(d);
+      });
+    }
+
+    function tampil(kelas, judul, isi) {
+      var h = el('hasil');
+      h.className = kelas;
+      h.innerHTML = '<b></b><span></span>';
+      h.firstChild.innerText = judul;
+      h.lastChild.innerText = isi;
+    }
+  </script>
+</body>
+</html>
