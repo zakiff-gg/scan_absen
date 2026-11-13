@@ -10114,6 +10114,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   
   
+  
   </script>
   <style>
     :root {
@@ -10318,29 +10319,100 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       bunyi(kelas);
       try { if (navigator.vibrate) navigator.vibrate(kelas === 'ok' ? 120 : [100, 60, 100]); } catch (e) {}
     }
+    // ---------- Suara: file WAV dibuat di HP, lantang & tetap bunyi walau iPhone mode senyap ----------
+    var NADA = {
+      scan: [{ f: 2000, ms: 130 }],                          // QR terbaca (bip scanner)
+      ok:   [{ f: 1568, ms: 130 }, { f: 2093, ms: 220 }],    // absen tercatat (dua nada naik)
+      warn: [{ f: 900, ms: 150 }, { f: 900, ms: 150 }],      // sudah absen
+      err:  [{ f: 330, ms: 280 }, { f: 250, ms: 360 }]       // gagal / tidak terdaftar
+    };
+    var SUARA = {};
+    var suaraSiap = false;
+
+    function buatWav(seq) {
+      var sr = 22050, jedaDet = 0.05, total = 0, i;
+      seq.forEach(function (n) { total += Math.round(sr * n.ms / 1000) + Math.round(sr * jedaDet); });
+      var buf = new ArrayBuffer(44 + total * 2);
+      var v = new DataView(buf);
+      function ws(o, s) { for (var k = 0; k < s.length; k++) v.setUint8(o + k, s.charCodeAt(k)); }
+      ws(0, 'RIFF'); v.setUint32(4, 36 + total * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      ws(36, 'data'); v.setUint32(40, total * 2, true);
+      var pos = 44;
+      seq.forEach(function (n) {
+        var len = Math.round(sr * n.ms / 1000), jeda = Math.round(sr * jedaDet);
+        var amp = (n.vol === undefined ? 1 : n.vol) * 0.92;
+        for (i = 0; i < len; i++) {
+          var fase = (n.f * (i / sr)) % 1;
+          var gel = fase < 0.5 ? 1 : -1; // gelombang kotak = terdengar lebih keras
+          var env = Math.min(1, i / (sr * 0.004), (len - i) / (sr * 0.01)); // fade cepat agar tidak "klik"
+          v.setInt16(pos, Math.round(gel * env * amp * 32767), true); pos += 2;
+        }
+        for (i = 0; i < jeda; i++) { v.setInt16(pos, 0, true); pos += 2; }
+      });
+      return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+    }
+
+    // Dipanggil dari sentuhan pengguna (tombol Masuk/Buka kamera/Foto) -- iOS mewajibkan ini sebelum bunyi boleh diputar.
     function siapkanBunyi() {
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+      try {
+        if (!suaraSiap) {
+          suaraSiap = true;
+          var senyap = buatWav([{ f: 1000, ms: 60, vol: 0 }]);
+          Object.keys(NADA).forEach(function (k) {
+            var a = new Audio(senyap);
+            a.setAttribute('playsinline', '');
+            SUARA[k] = a;
+            var asli = buatWav(NADA[k]);
+            var pasang = function () { a.src = asli; a.load(); };
+            var p = a.play(); // memutar file senyap untuk "membuka kunci" pemutaran
+            if (p && p.then) p.then(function () { a.pause(); pasang(); }).catch(pasang);
+            else pasang();
+          });
+        }
+      } catch (e) {}
       try {
         var AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) return;
-        if (!audioCtx) audioCtx = new AC();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
+        if (AC) {
+          if (!audioCtx) audioCtx = new AC();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
       } catch (e) {}
     }
-    function bunyi(kelas) {
+
+    function bunyi(nama) {
+      var a = SUARA[nama];
+      if (a) {
+        try {
+          a.pause();
+          a.currentTime = 0;
+          var p = a.play();
+          if (p && p.catch) p.catch(function () { bunyiCadangan(nama); });
+          return;
+        } catch (e) {}
+      }
+      bunyiCadangan(nama);
+    }
+
+    // Cadangan (WebAudio) kalau pemutar media ditolak.
+    function bunyiCadangan(nama) {
       try {
-        if (!audioCtx) return;
-        var nada = kelas === 'ok' ? [880, 1320] : [330, 260];
-        nada.forEach(function (f, i) {
+        if (!audioCtx || !NADA[nama]) return;
+        var t0 = audioCtx.currentTime;
+        NADA[nama].forEach(function (n) {
           var o = audioCtx.createOscillator();
           var g = audioCtx.createGain();
-          o.type = 'sine';
-          o.frequency.value = f;
-          var t0 = audioCtx.currentTime + i * 0.1;
+          o.type = 'square';
+          o.frequency.value = n.f;
           g.gain.setValueAtTime(0.0001, t0);
-          g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
-          g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+          g.gain.exponentialRampToValueAtTime(0.9, t0 + 0.01);
+          g.gain.setValueAtTime(0.9, t0 + n.ms / 1000 - 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.ms / 1000);
           o.connect(g); g.connect(audioCtx.destination);
-          o.start(t0); o.stop(t0 + 0.11);
+          o.start(t0); o.stop(t0 + n.ms / 1000 + 0.02);
+          t0 += n.ms / 1000 + 0.05;
         });
       } catch (e) {}
     }
@@ -10524,7 +10596,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       });
       box.scrollTop = 0;
       el('modal').classList.add('show');
-      bunyi('ok');
+      bunyi('scan'); // bip "QR terbaca"
       try { if (navigator.vibrate) navigator.vibrate(100); } catch (e) {}
       clearTimeout(modalTimer);
       modalTimer = setTimeout(function () { tutupModal(true); toast('warn', 'Dibatalkan', 'Tidak ada proyek dipilih. Scan ulang.', 3000); }, 30000);
