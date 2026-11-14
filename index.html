@@ -10115,6 +10115,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   
   
   
+  
+  
   </script>
   <style>
     :root {
@@ -10152,6 +10154,20 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       margin-top: 8px; padding: 16px 14px; font-size: 17px; }
     #modalList button.pilih.terakhir { border-color: var(--ok); }
     #modalList button.pilih small { color: var(--ok); font-weight: 600; font-size: 12px; margin-left: 6px; }
+
+    button.mini { width: auto; margin: 6px 0 0; padding: 5px 10px; font-size: 12px; font-weight: 600;
+      background: transparent; border: 1px solid var(--line); color: var(--soft); border-radius: 8px; }
+    .pekerja .kanan { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px 8px; }
+    button.mini.bahaya { border-color: var(--err); color: var(--err); }
+    #modalList button.pilih.bahaya { border-color: var(--err); }
+    .logrow .st.batal { color: var(--soft); }
+    .cari { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 12px;
+      margin-top: 8px; background: #19133a; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+    .cari small { color: var(--soft); font-size: 12px; }
+    .cari .tag { font-size: 12px; white-space: nowrap; color: var(--ok); }
+    .cari.sudah { opacity: .6; }
+    .cari.sudah .tag { color: var(--warn); }
+    .pekerja button.mini { margin: 0; }
 
     /* status bar */
     #statusBar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: 13px; }
@@ -10206,9 +10222,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   <div id="modal">
     <div id="modalSheet">
-      <div class="hint" style="margin:0">QR terbaca &middot; Absen Berangkat</div>
+      <div class="hint" id="modalJudul" style="margin:0">QR terbaca &middot; Absen Berangkat</div>
       <b id="modalNama" style="font-size:22px;margin-top:2px"></b>
-      <div class="hint" style="margin-top:6px">Pilih proyek tempat bekerja hari ini:</div>
+      <div class="hint" id="modalSub" style="margin-top:6px">Pilih proyek tempat bekerja hari ini:</div>
       <div id="modalList"></div>
       <button id="btnBatalModal" class="ghost">Batal</button>
     </div>
@@ -10252,6 +10268,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     <button id="btnFoto" class="ghost">Ambil foto QR (cadangan)</button>
     <input type="file" id="fileFoto" accept="image/*" capture="environment" class="hidden">
 
+    <div class="sec-head"><b>Absen manual</b></div>
+    <div class="card" style="margin-top:8px">
+      <label for="cariNama">Karyawan lupa / QR rusak: cari nama, lalu ketuk</label>
+      <input type="text" id="cariNama" autocomplete="off" placeholder="Ketik nama...">
+      <div id="cariHasil"></div>
+    </div>
+
     <div class="sec-head"><b>Scan terakhir</b></div>
     <div id="logScan" class="card" style="margin-top:8px"></div>
 
@@ -10261,6 +10284,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     <div class="hint" id="rekapTanggal"></div>
     <div id="rekapList"></div>
 
+    <div class="hint">Orang yang sudah absen tidak bisa absen lagi (ditolak). Salah proyek: tombol Pindah di Rekap. Salah orang: tombol Batalkan di Rekap.</div>
     <div class="hint">Data karyawan disimpan di HP ini, jadi scan langsung berhasil tanpa menunggu spreadsheet.
       Absen dikirim ke spreadsheet di latar belakang; kalau sinyal putus, data tetap aman dan dikirim otomatis saat sinyal kembali.</div>
     <button id="btnKeluar" class="ghost">Keluar</button>
@@ -10276,6 +10300,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     var stream = null, scanning = false, flushing = false, sinkronJalan = false;
     var recent = {}, lastDecode = 0, lastDetect = 0, labelAktif = false;
     var logList = [];
+    var kirimIds = {}; // id absen yang sedang dalam perjalanan ke server
     var rekapBuka = {};
     var toastTimer = null, audioCtx = null;
 
@@ -10319,12 +10344,12 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       bunyi(kelas);
       try { if (navigator.vibrate) navigator.vibrate(kelas === 'ok' ? 120 : [100, 60, 100]); } catch (e) {}
     }
-    // ---------- Suara: file WAV dibuat di HP, lantang & tetap bunyi walau iPhone mode senyap ----------
+    // ---------- Suara: file WAV dibuat di HP, nada halus & tetap bunyi walau iPhone mode senyap ----------
     var NADA = {
-      scan: [{ f: 2000, ms: 130 }],                          // QR terbaca (bip scanner)
-      ok:   [{ f: 1568, ms: 130 }, { f: 2093, ms: 220 }],    // absen tercatat (dua nada naik)
-      warn: [{ f: 900, ms: 150 }, { f: 900, ms: 150 }],      // sudah absen
-      err:  [{ f: 330, ms: 280 }, { f: 250, ms: 360 }]       // gagal / tidak terdaftar
+      scan: [{ f: 1320, ms: 90 }],                           // QR terbaca (bip lembut)
+      ok:   [{ f: 880, ms: 110 }, { f: 1175, ms: 190 }],     // absen tercatat (dua nada naik)
+      warn: [{ f: 740, ms: 120 }, { f: 740, ms: 120 }],      // sudah absen
+      err:  [{ f: 392, ms: 200 }, { f: 330, ms: 300 }]       // gagal / tidak terdaftar
     };
     var SUARA = {};
     var suaraSiap = false;
@@ -10342,11 +10367,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       var pos = 44;
       seq.forEach(function (n) {
         var len = Math.round(sr * n.ms / 1000), jeda = Math.round(sr * jedaDet);
-        var amp = (n.vol === undefined ? 1 : n.vol) * 0.92;
+        var amp = (n.vol === undefined ? 1 : n.vol) * 0.6;
         for (i = 0; i < len; i++) {
           var fase = (n.f * (i / sr)) % 1;
-          var gel = fase < 0.5 ? 1 : -1; // gelombang kotak = terdengar lebih keras
-          var env = Math.min(1, i / (sr * 0.004), (len - i) / (sr * 0.01)); // fade cepat agar tidak "klik"
+          var gel = Math.sin(2 * Math.PI * fase); // gelombang sinus = nada halus
+          var env = Math.min(1, i / (sr * 0.012), (len - i) / (sr * 0.05)); // masuk & keluar pelan, tanpa "klik"
           v.setInt16(pos, Math.round(gel * env * amp * 32767), true); pos += 2;
         }
         for (i = 0; i < jeda; i++) { v.setInt16(pos, 0, true); pos += 2; }
@@ -10404,11 +10429,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         NADA[nama].forEach(function (n) {
           var o = audioCtx.createOscillator();
           var g = audioCtx.createGain();
-          o.type = 'square';
+          o.type = 'sine';
           o.frequency.value = n.f;
           g.gain.setValueAtTime(0.0001, t0);
-          g.gain.exponentialRampToValueAtTime(0.9, t0 + 0.01);
-          g.gain.setValueAtTime(0.9, t0 + n.ms / 1000 - 0.02);
+          g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.015);
+          g.gain.setValueAtTime(0.5, t0 + n.ms / 1000 - 0.03);
           g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.ms / 1000);
           o.connect(g); g.connect(audioCtx.destination);
           o.start(t0); o.stop(t0 + n.ms / 1000 + 0.02);
@@ -10467,6 +10492,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
     function terapkanLokal(it) {
       if (tglLokal(new Date(it.ts)) !== S.tanggal) return;
+      if (it.jenis === 'Pindah') {
+        var ap = S.absen[it.uid];
+        if (ap) {
+          if (ap.berangkat) ap.berangkat.proyek = it.proyek;
+          if (ap.pulang) ap.pulang.proyek = it.proyek;
+        }
+        return;
+      }
+      if (it.jenis === 'Batal') { hapusLokal(it.uid, it.target); return; }
       var kar = S.karyawan[it.uid];
       var a = S.absen[it.uid] || (S.absen[it.uid] = { nama: kar ? kar.nama : it.uid, berangkat: null, pulang: null });
       var jam = hhmm(new Date(it.ts));
@@ -10526,6 +10560,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       el('jenisHint').innerText = j === 'Berangkat'
         ? 'Berangkat: setelah QR terbaca, pilih proyek di popup.'
         : 'Pulang: otomatis mengikuti proyek saat berangkat.';
+      renderCari();
     }
     el('segBerangkat').addEventListener('click', function () { setJenis('Berangkat'); });
     el('segPulang').addEventListener('click', function () { setJenis('Pulang'); });
@@ -10558,37 +10593,50 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
       var sudah = sudahAbsen(uid, jenis);
       if (sudah) {
-        toast('warn', kar.nama, 'Sudah absen ' + jenis + ' hari ini (' + sudah.jam + ')');
+        toast('warn', kar.nama, 'DITOLAK \u00b7 sudah absen ' + jenis + ' hari ini (' + sudah.jam + ')');
         return;
       }
 
-      if (jenis === 'Berangkat') { bukaPilihProyek(uid); return; }
+      if (jenis === 'Berangkat') { bukaModalProyek(uid, 'berangkat'); return; }
       catat(uid, 'Pulang', '');
     }
 
-    // ---------- Popup pilih proyek (khusus Berangkat) ----------
-    function bukaPilihProyek(uid) {
-      var daftar = (S.proyek || []).slice();
+    // ---------- Popup pilih proyek (Berangkat baru, atau PINDAH proyek untuk membetulkan salah pilih) ----------
+    var modalMode = 'berangkat';
+
+    function bukaModalProyek(uid, mode) {
+      if (modalAktif) return;
+      var daftar = (S.proyek || []).slice(); // urutan SAMA dengan sheet Proyek, tidak diacak
       if (!daftar.length) {
-        delete recent[uid];
+        if (mode === 'berangkat') delete recent[uid];
         toast('err', 'Daftar proyek kosong', 'Isi sheet Proyek lalu tekan Sinkron.', 4000);
         return;
       }
+      var a = S.absen[uid];
+      var kar = S.karyawan[uid];
+      var saatIni = '';
+      if (mode === 'pindah') {
+        if (!a || !a.berangkat) { toast('err', 'Belum absen Berangkat', 'Tidak ada proyek yang bisa dipindah.', 3500); return; }
+        saatIni = a.berangkat.proyek;
+      }
       modalAktif = true;
       modalUid = uid;
-      el('modalNama').innerText = S.karyawan[uid].nama;
-      var terakhir = S.proyekDipilih;
-      var idx = daftar.indexOf(terakhir);
-      if (idx !== -1) { daftar.splice(idx, 1); daftar.unshift(terakhir); } // proyek terakhir dipakai di paling atas
+      modalMode = mode;
+      el('btnBatalModal').innerText = 'Batal';
+      el('modalJudul').innerText = mode === 'pindah' ? 'Pindah proyek' : 'QR terbaca \u00b7 Absen Berangkat';
+      el('modalSub').innerText = mode === 'pindah' ? 'Pilih proyek yang benar:' : 'Pilih proyek tempat bekerja hari ini:';
+      el('modalNama').innerText = kar ? kar.nama : (a ? a.nama : uid);
+      var tandai = mode === 'pindah' ? saatIni : S.proyekDipilih; // hanya diberi tanda, posisinya tidak berubah
+      var label = mode === 'pindah' ? 'proyek saat ini' : 'terakhir dipakai';
       var box = el('modalList');
       box.innerHTML = '';
       daftar.forEach(function (nama) {
         var b = document.createElement('button');
-        b.className = 'pilih' + (nama === terakhir ? ' terakhir' : '');
+        b.className = 'pilih' + (nama === tandai ? ' terakhir' : '');
         b.appendChild(document.createTextNode(nama));
-        if (nama === terakhir) {
+        if (nama === tandai) {
           var sm = document.createElement('small');
-          sm.innerText = 'terakhir dipakai';
+          sm.innerText = label;
           b.appendChild(sm);
         }
         b.addEventListener('click', function () { pilihProyek(nama); });
@@ -10596,27 +10644,191 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       });
       box.scrollTop = 0;
       el('modal').classList.add('show');
-      bunyi('scan'); // bip "QR terbaca"
-      try { if (navigator.vibrate) navigator.vibrate(100); } catch (e) {}
+      if (mode === 'berangkat') {
+        bunyi('scan'); // bip "QR terbaca"
+        try { if (navigator.vibrate) navigator.vibrate(100); } catch (e) {}
+      }
       clearTimeout(modalTimer);
-      modalTimer = setTimeout(function () { tutupModal(true); toast('warn', 'Dibatalkan', 'Tidak ada proyek dipilih. Scan ulang.', 3000); }, 30000);
+      modalTimer = setTimeout(function () {
+        tutupModal(true);
+        toast('warn', 'Dibatalkan', mode === 'berangkat' ? 'Tidak ada proyek dipilih. Scan ulang.' : 'Proyek tidak jadi dipindah.', 3000);
+      }, 30000);
     }
 
     function tutupModal(batal) {
+      var mode = modalMode;
       modalAktif = false;
       clearTimeout(modalTimer);
       el('modal').classList.remove('show');
-      if (batal && modalUid) delete recent[modalUid]; // boleh scan ulang langsung
+      if (batal && modalUid && mode === 'berangkat') delete recent[modalUid]; // boleh scan ulang langsung
       modalUid = null;
     }
     el('btnBatalModal').addEventListener('click', function () { tutupModal(true); });
 
     function pilihProyek(nama) {
-      var uid = modalUid;
+      var uid = modalUid, mode = modalMode;
       tutupModal(false);
       if (!uid) return;
+      if (mode === 'pindah') { pindahProyek(uid, nama); return; }
       S.proyekDipilih = nama;
       catat(uid, 'Berangkat', nama);
+    }
+
+    // Pindah proyek: ubah di HP seketika, lalu kirim perubahan ke spreadsheet di latar belakang.
+    function pindahProyek(uid, proyekBaru) {
+      var a = S.absen[uid];
+      var kar = S.karyawan[uid];
+      var nama = kar ? kar.nama : uid;
+      if (!a || !a.berangkat) { toast('err', 'Belum absen Berangkat', 'Tidak ada proyek yang bisa dipindah.', 3500); return; }
+      if (a.berangkat.proyek === proyekBaru) { toast('warn', nama, 'Sudah di ' + proyekBaru); return; }
+
+      a.berangkat.proyek = proyekBaru;
+      if (a.pulang) a.pulang.proyek = proyekBaru;
+
+      // Kalau absen Berangkat orang ini BELUM dikirim (masih menunggu di antrian), cukup ubah itemnya.
+      // Kalau sudah/sedang dikirim, antrikan perintah "Pindah" yang dijalankan server setelahnya.
+      var tertunda = S.queue.filter(function (x) { return x.uid === uid && x.jenis === 'Berangkat' && !kirimIds[x.id]; })[0];
+      if (tertunda) {
+        tertunda.proyek = proyekBaru;
+      } else {
+        var now = Date.now();
+        S.queue.push({ id: now + '-' + Math.floor(Math.random() * 1000), uid: uid, jenis: 'Pindah', proyek: proyekBaru, ts: now });
+      }
+      logList.forEach(function (x) { if (x.uid === uid) x.proyek = proyekBaru; });
+
+      simpan();
+      renderLog();
+      renderRekap();
+      updateBar();
+      toast('ok', '\u21aa ' + nama, 'Dipindah ke ' + proyekBaru);
+      flush();
+    }
+
+    // ---------- Batalkan absen (mis. salah scan orang) ----------
+    function hapusLokal(uid, target) {
+      var a = S.absen[uid];
+      if (!a) return;
+      a.pulang = null;
+      if (target !== 'Pulang') a.berangkat = null;
+      if (!a.berangkat && !a.pulang) delete S.absen[uid];
+    }
+
+    function bukaModalBatal(uid) {
+      if (modalAktif) return;
+      var a = S.absen[uid];
+      if (!a || (!a.berangkat && !a.pulang)) return;
+      var kar = S.karyawan[uid];
+      modalAktif = true;
+      modalUid = uid;
+      modalMode = 'batal';
+      el('btnBatalModal').innerText = 'Tutup';
+      el('modalJudul').innerText = 'Batalkan absen';
+      el('modalNama').innerText = kar ? kar.nama : a.nama;
+      var rincian = [];
+      if (a.berangkat) rincian.push('Berangkat ' + a.berangkat.jam + ' \u00b7 ' + a.berangkat.proyek);
+      if (a.pulang) rincian.push('Pulang ' + a.pulang.jam);
+      el('modalSub').innerText = rincian.join('   |   ');
+      var box = el('modalList');
+      box.innerHTML = '';
+      function opsi(teks, target) {
+        var b = document.createElement('button');
+        b.className = 'pilih bahaya';
+        b.innerText = teks;
+        b.addEventListener('click', function () { tutupModal(false); batalkanAbsen(uid, target); });
+        box.appendChild(b);
+      }
+      if (a.pulang) opsi('Batalkan Pulang saja', 'Pulang');
+      opsi(a.pulang ? 'Batalkan semua (Berangkat & Pulang)' : 'Batalkan absen Berangkat', 'Semua');
+      box.scrollTop = 0;
+      el('modal').classList.add('show');
+      clearTimeout(modalTimer);
+      modalTimer = setTimeout(function () { tutupModal(true); toast('warn', 'Ditutup', 'Tidak ada absen yang dibatalkan.', 2500); }, 30000);
+    }
+
+    function batalkanAbsen(uid, target) { // target: 'Pulang' | 'Semua'
+      var a = S.absen[uid];
+      if (!a) return;
+      var kar = S.karyawan[uid];
+      var nama = kar ? kar.nama : a.nama;
+      var daftarJenis = target === 'Pulang' ? ['Pulang'] : ['Berangkat', 'Pulang'];
+      var perluServer = false;
+
+      // Absen yang BELUM dikirim cukup dicabut dari antrian; yang sudah/sedang dikirim butuh perintah ke server.
+      daftarJenis.forEach(function (j) {
+        var ada = j === 'Berangkat' ? a.berangkat : a.pulang;
+        if (!ada) return;
+        var idx = -1;
+        S.queue.forEach(function (x, n) { if (x.uid === uid && x.jenis === j && !kirimIds[x.id]) idx = n; });
+        if (idx !== -1) S.queue.splice(idx, 1); else perluServer = true;
+      });
+      if (target === 'Semua' && !perluServer) {
+        S.queue = S.queue.filter(function (x) { return !(x.uid === uid && x.jenis === 'Pindah' && !kirimIds[x.id]); });
+      }
+
+      var now = Date.now();
+      var idBatal = now + '-' + Math.floor(Math.random() * 1000);
+      if (perluServer) S.queue.push({ id: idBatal, uid: uid, jenis: 'Batal', target: target, ts: now });
+
+      // Tandai catatan lama di daftar scan sebagai dibatalkan, tambah catatan pembatalan.
+      logList.forEach(function (x) {
+        if (x.uid === uid && daftarJenis.indexOf(x.jenis) !== -1 && x.status !== 'batal') { x.status = 'batal'; x.pesan = 'dibatalkan'; }
+      });
+      logList.unshift({ id: idBatal, uid: uid, nama: nama, jenis: 'Batal ' + (target === 'Pulang' ? 'Pulang' : 'absen'),
+        jam: hhmm(new Date(now)), ket: '', proyek: '', status: perluServer ? 'tunggu' : 'ok', pesan: '' });
+      if (logList.length > 8) logList.pop();
+
+      hapusLokal(uid, target);
+      delete recent[uid]; // boleh di-scan ulang kalau memang perlu absen lagi
+
+      simpan();
+      renderLog();
+      renderRekap();
+      renderCari();
+      updateBar();
+      toast('warn', nama, target === 'Pulang' ? 'Absen Pulang dibatalkan' : 'Absen dibatalkan');
+      flush();
+    }
+
+    // ---------- Absen manual (karyawan lupa / QR rusak) ----------
+    el('cariNama').addEventListener('input', renderCari);
+
+    function renderCari() {
+      var q = el('cariNama').value.trim().toLowerCase();
+      var box = el('cariHasil');
+      box.innerHTML = '';
+      if (!q) return;
+      var hasil = [];
+      Object.keys(S.karyawan).forEach(function (uid) {
+        var k = S.karyawan[uid];
+        if (String(k.nama).toLowerCase().indexOf(q) !== -1) hasil.push({ uid: uid, k: k });
+      });
+      hasil.sort(function (x, y) { return x.k.nama < y.k.nama ? -1 : 1; });
+      hasil = hasil.slice(0, 8);
+      if (!hasil.length) { box.innerText = 'Tidak ditemukan.'; return; }
+      hasil.forEach(function (h) {
+        var sudah = sudahAbsen(h.uid, jenis);
+        var row = document.createElement('div');
+        row.className = 'cari' + (sudah ? ' sudah' : '');
+        var kiri = document.createElement('div');
+        var n = document.createElement('div');
+        n.innerText = h.k.nama;
+        var p = document.createElement('small');
+        p.innerText = h.k.posisi || '';
+        kiri.appendChild(n); kiri.appendChild(p);
+        var tag = document.createElement('div');
+        tag.className = 'tag';
+        tag.innerText = sudah ? 'sudah ' + jenis + ' ' + sudah.jam : 'ketuk: absen ' + jenis;
+        row.appendChild(kiri); row.appendChild(tag);
+        row.addEventListener('click', function () { absenManual(h.uid); });
+        box.appendChild(row);
+      });
+    }
+
+    function absenManual(uid) {
+      siapkanBunyi();
+      el('cariNama').value = '';
+      el('cariHasil').innerHTML = '';
+      handleScan(uid, true); // aturan sama persis dengan scan: sudah absen -> ditolak; Berangkat -> pilih proyek
     }
 
     // ---------- Catat absen (lokal dulu, kirim di latar belakang) ----------
@@ -10625,7 +10837,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if (!kar) return;
       var sudah = sudahAbsen(uid, jenisAbsen);
       if (sudah) {
-        toast('warn', kar.nama, 'Sudah absen ' + jenisAbsen + ' hari ini (' + sudah.jam + ')');
+        toast('warn', kar.nama, 'DITOLAK \u00b7 sudah absen ' + jenisAbsen + ' hari ini (' + sudah.jam + ')');
         return;
       }
       var now = Date.now();
@@ -10636,7 +10848,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       var jam = hhmm(new Date(now));
       var ket = jenisAbsen === 'Berangkat' ? ketBerangkat(jam) : ketPulang(jam);
       var proyekTampil = jenisAbsen === 'Berangkat' ? proyek : ((S.absen[uid].pulang && S.absen[uid].pulang.proyek) || '');
-      logList.unshift({ id: it.id, nama: kar.nama, jenis: jenisAbsen, jam: jam, ket: ket, proyek: proyekTampil, status: 'tunggu', pesan: '' });
+      logList.unshift({ id: it.id, uid: uid, nama: kar.nama, jenis: jenisAbsen, jam: jam, ket: ket, proyek: proyekTampil, status: 'tunggu', pesan: '' });
       if (logList.length > 8) logList.pop();
 
       simpan();
@@ -10654,6 +10866,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       flushing = true;
       var batch = S.queue.slice(0, 10);
       var adaGagal = false;
+      kirimIds = {};
+      batch.forEach(function (it) { kirimIds[it.id] = true; });
       apiPost({ action: 'webAbsenBatch', pin: S.pin, items: JSON.stringify(batch) })
         .then(function (r) {
           if (r && r.kode === 'PIN') { pinDitolak(); return false; }
@@ -10675,7 +10889,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
               var kar = S.karyawan[it.uid];
               var msg = h.status === 'TIDAK_DIKENAL' ? 'Kartu tidak terdaftar' : (h.pesan || 'Gagal');
               if (lg) { lg.status = 'gagal'; lg.pesan = msg; }
-              toast('err', 'Gagal tercatat: ' + (kar ? kar.nama : it.uid), msg, 5000);
+              toast('err', (it.jenis === 'Pindah' ? 'Gagal pindah proyek: ' : (it.jenis === 'Batal' ? 'Gagal membatalkan: ' : 'Gagal tercatat: ')) + (kar ? kar.nama : it.uid), msg, 5000);
             }
           });
           simpan();
@@ -10685,6 +10899,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         .catch(function () { return false; }) // tidak ada sinyal -> coba lagi nanti
         .then(function (ok) {
           flushing = false;
+          kirimIds = {};
           updateBar();
           if (ok && S.queue.length) flush();
           else if (ok && adaGagal) sinkron();
@@ -10715,12 +10930,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         n.innerText = x.nama;
         var k = document.createElement('div');
         k.className = 'ket';
-        k.innerText = x.jenis + (x.proyek ? ' \u00b7 ' + x.proyek : '') + ' \u00b7 ' + x.jam + ' \u00b7 ' + x.ket + (x.pesan ? ' \u00b7 ' + x.pesan : '');
+        k.innerText = [x.jenis, x.proyek, x.jam, x.ket, x.pesan].filter(Boolean).join(' \u00b7 ');
         kiri.appendChild(n); kiri.appendChild(k);
+        var kanan = document.createElement('div');
+        kanan.style.textAlign = 'right';
         var st = document.createElement('div');
         st.className = 'st ' + x.status;
-        st.innerText = x.status === 'ok' ? '\u2713 terkirim' : (x.status === 'gagal' ? '\u26a0 gagal' : '\u23f3 mengirim');
-        row.appendChild(kiri); row.appendChild(st);
+        st.innerText = x.status === 'ok' ? '\u2713 terkirim' : (x.status === 'gagal' ? '\u26a0 gagal' : (x.status === 'batal' ? '\u2715 dibatalkan' : '\u23f3 mengirim'));
+        kanan.appendChild(st);
+        row.appendChild(kiri); row.appendChild(kanan);
         box.appendChild(row);
       });
     }
@@ -10731,7 +10949,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       Object.keys(S.absen).forEach(function (uid) {
         var a = S.absen[uid];
         var pr = (a.berangkat && a.berangkat.proyek) || (a.pulang && a.pulang.proyek) || 'Tanpa Proyek';
-        (grup[pr] = grup[pr] || []).push(a);
+        (grup[pr] = grup[pr] || []).push({ uid: uid, a: a });
         total++;
       });
       el('rekapTanggal').innerText = (S.tanggal || '') + ' \u00b7 total ' + total + ' orang absen';
@@ -10741,8 +10959,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if (!namaProyek.length) { box.innerText = 'Belum ada yang absen hari ini.'; return; }
 
       namaProyek.forEach(function (pr) {
-        var pekerja = grup[pr].slice().sort(function (a, b) { return a.nama < b.nama ? -1 : 1; });
-        var masih = pekerja.filter(function (p) { return !p.pulang; }).length;
+        var pekerja = grup[pr].slice().sort(function (x, y) { return x.a.nama < y.a.nama ? -1 : 1; });
+        var masih = pekerja.filter(function (p) { return !p.a.pulang; }).length;
         var d = document.createElement('details');
         d.className = 'proyek';
         d.open = rekapBuka[pr] === undefined ? namaProyek.length === 1 : rekapBuka[pr];
@@ -10754,11 +10972,26 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
           var row = document.createElement('div');
           row.className = 'pekerja';
           var n = document.createElement('span');
-          n.innerText = w.nama;
+          n.innerText = w.a.nama;
+          var kanan = document.createElement('span');
+          kanan.className = 'kanan';
           var j = document.createElement('span');
-          j.className = 'jam' + (w.pulang ? '' : ' lokasi');
-          j.innerText = (w.berangkat ? w.berangkat.jam : '?') + (w.pulang ? ' \u2192 ' + w.pulang.jam : ' \u00b7 di lokasi');
-          row.appendChild(n); row.appendChild(j);
+          j.className = 'jam' + (w.a.pulang ? '' : ' lokasi');
+          j.innerText = (w.a.berangkat ? w.a.berangkat.jam : '?') + (w.a.pulang ? ' \u2192 ' + w.a.pulang.jam : ' \u00b7 di lokasi');
+          kanan.appendChild(j);
+          if (w.a.berangkat) {
+            var b = document.createElement('button');
+            b.className = 'mini';
+            b.innerText = 'Pindah';
+            b.addEventListener('click', function () { bukaModalProyek(w.uid, 'pindah'); });
+            kanan.appendChild(b);
+          }
+          var bb = document.createElement('button');
+          bb.className = 'mini bahaya';
+          bb.innerText = 'Batalkan';
+          bb.addEventListener('click', function () { bukaModalBatal(w.uid); });
+          kanan.appendChild(bb);
+          row.appendChild(n); row.appendChild(kanan);
           d.appendChild(row);
         });
         box.appendChild(d);
